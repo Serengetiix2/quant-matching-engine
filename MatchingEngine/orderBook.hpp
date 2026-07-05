@@ -4,6 +4,7 @@
 #include <list>
 #include <cstdint>
 #include <iostream>
+#include <algorithm>
 #include "orderClass.hpp"
 
 using Price = int64_t;
@@ -22,7 +23,6 @@ private:
     int64_t nextSeq = 0;
 
 public:
-   // Return pointer to best order (nullptr if none). Marked const because it does not modify the book.
    const Order* best(Side s) const {
         if (s == Side::Buy) {
             if (!bids.empty()) return &bids.begin()->second.orders.front();
@@ -31,7 +31,7 @@ public:
         }
         return nullptr;
     }
-    // Returns true if an order with given id is present in the cancel index
+   
     bool contains(Id id) const {
         return cancelIndex.find(id) != cancelIndex.end();
     }
@@ -41,7 +41,7 @@ public:
             return lst.insert(lst.end(), o);
     }
 
-    // Accept by value so callers can pass temporaries.
+    
     void rest(Order o){
         o.seq = nextSeq++;
         orderIterator it;
@@ -49,5 +49,60 @@ public:
         else                     it = restInto(asks, o);
 
         cancelIndex[o.id] = it;
+    }
+
+    struct Fill{
+        int64_t price; //resting order price
+        int64_t quantity;
+        int64_t agressorId;
+        int64_t restingId;
+
+        Fill(int64_t price, int64_t quantity, int64_t agressorId, int64_t restingId)
+        : price(price), 
+        quantity(quantity), 
+        agressorId(agressorId), 
+        restingId(restingId) {}
+            
+    
+    };
+    template <typename F>
+    auto withOppositeSide(Order& incoming, F&& fn) {
+        if (incoming.side == Side::Buy) {
+            return fn(asks);
+        } else {
+            return fn(bids);
+        }
+    }
+
+    std::vector<Fill> match(Order& incoming){
+        std::vector<Fill> fills;
+        withOppositeSide(incoming, [&](auto& oppositeSide) {
+            while (incoming.quantity > 0 && !oppositeSide.empty()) {
+               Order& resting = oppositeSide.begin()->second.orders.front();
+                        if (incoming.price >= resting.price) {
+                    int64_t tradeQty = std::min(incoming.quantity, resting.quantity);
+                    incoming.quantity -= tradeQty;
+                    resting.quantity -= tradeQty;
+                    fills.emplace_back(resting.price, tradeQty, incoming.id, resting.id);
+
+                    if (resting.quantity == 0) {
+                        oppositeSide.begin()->second.orders.pop_front();
+                        cancelIndex.erase(resting.id);
+                        if (oppositeSide.begin()->second.orders.empty()) {
+                            oppositeSide.erase(oppositeSide.begin());
+                        }
+                    }
+                } else if (incoming.type == Type::Limit) {
+                    break;
+                }
+            }
+        });
+
+        if (incoming.type == Type::Limit) {
+            rest(incoming);
+        } else {
+            std::cout << " order " << incoming.id << " has been dropped" << "\n";
+        }
+        return fills;
     }
 };

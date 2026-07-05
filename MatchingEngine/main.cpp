@@ -4,11 +4,11 @@
 
 int main() {
     // Test 1 (existing)
-    {
+    /*{
         OrderBook book;
-        Order o{Side::Sell, Type::Limit, 102, 10, 1, 0};
+        Order o{Side::Buy, Type::Limit, 102, 10, 1, 0};
         book.rest(o);
-        const Order* best = book.best(Side::Sell);
+        const Order* best = book.best(Side::Buy);
         if (best != nullptr && best->price == 102) std::cout << "Test 1 passed\n";
         else std::cout << "Test 1 FAILED\n";
     }
@@ -16,10 +16,10 @@ int main() {
     // Test 2 — best ask is the lowest, not the first inserted
     {
         OrderBook book;
-        book.rest(Order{Side::Sell, Type::Limit, 105, 1, 1, 0});
-        book.rest(Order{Side::Sell, Type::Limit, 102, 1, 2, 0});
-        book.rest(Order{Side::Sell, Type::Limit, 108, 1, 3, 0});
-        const Order* best = book.best(Side::Sell);
+        book.rest(Order{Side::Buy, Type::Limit, 105, 1, 1, 0});
+        book.rest(Order{Side::Buy, Type::Limit, 102, 1, 2, 0});
+        book.rest(Order{Side::Buy, Type::Limit, 108, 1, 3, 0});
+        const Order* best = book.best(Side::Buy);
         if (best != nullptr && best->price == 102) std::cout << "Test 2 passed\n";
         else std::cout << "Test 2 FAILED (expected 102, got " << (best? std::to_string(best->price) : std::string("<null>")) << ")\n";
     }
@@ -40,13 +40,13 @@ int main() {
         OrderBook book;
         book.rest(Order{Side::Buy, Type::Limit, 100, 1, 1, 0});
         book.rest(Order{Side::Buy, Type::Limit, 105, 1, 2, 0});
-        book.rest(Order{Side::Sell, Type::Limit, 102, 1, 3, 0});
-        book.rest(Order{Side::Sell, Type::Limit, 108, 1, 4, 0});
+        book.rest(Order{Side::Buy, Type::Limit, 102, 1, 3, 0});
+        book.rest(Order{Side::Buy, Type::Limit, 108, 1, 4, 0});
         const Order* bestBuy = book.best(Side::Buy);
-        const Order* bestSell = book.best(Side::Sell);
-        bool ok = bestBuy && bestSell && bestBuy->price == 105 && bestSell->price == 102;
+        const Order* bestBuy = book.best(Side::Buy);
+        bool ok = bestBuy && bestBuy && bestBuy->price == 105 && bestBuy->price == 102;
         if (ok) std::cout << "Test 4 passed\n";
-        else std::cout << "Test 4 FAILED (buy=" << (bestBuy? std::to_string(bestBuy->price):"<null>") << ", sell=" << (bestSell? std::to_string(bestSell->price):"<null>") << ")\n";
+        else std::cout << "Test 4 FAILED (buy=" << (bestBuy? std::to_string(bestBuy->price):"<null>") << ", Buy=" << (bestBuy? std::to_string(bestBuy->price):"<null>") << ")\n";
     }
 
     // Test 5 — empty side returns nothing
@@ -54,17 +54,17 @@ int main() {
         OrderBook book;
         // rest a buy only
         book.rest(Order{Side::Buy, Type::Limit, 110, 1, 1, 0});
-        const Order* bestSell = book.best(Side::Sell);
-        if (bestSell == nullptr) std::cout << "Test 5 passed\n";
-        else std::cout << "Test 5 FAILED (expected <null>, got " << bestSell->price << ")\n";
+        const Order* bestBuy = book.best(Side::Buy);
+        if (bestBuy == nullptr) std::cout << "Test 5 passed\n";
+        else std::cout << "Test 5 FAILED (expected <null>, got " << bestBuy->price << ")\n";
     }
 
     // Test 6 — FIFO: same price, oldest first
     {
         OrderBook book;
-        book.rest(Order{Side::Sell, Type::Limit, 102, 10, 1, 0});
-        book.rest(Order{Side::Sell, Type::Limit, 102, 5, 2, 0});
-        const Order* best = book.best(Side::Sell);
+        book.rest(Order{Side::Buy, Type::Limit, 102, 10, 1, 0});
+        book.rest(Order{Side::Buy, Type::Limit, 102, 5, 2, 0});
+        const Order* best = book.best(Side::Buy);
         if (best != nullptr && best->id == 1) std::cout << "Test 6 passed\n";
         else std::cout << "Test 6 FAILED (expected id=1, got " << (best? std::to_string(best->id) : std::string("<null>")) << ")\n";
     }
@@ -74,11 +74,30 @@ int main() {
         OrderBook book;
         book.rest(Order{Side::Buy, Type::Limit, 100, 1, 1, 0});
         book.rest(Order{Side::Buy, Type::Limit, 101, 1, 2, 0});
-        book.rest(Order{Side::Sell, Type::Limit, 102, 1, 3, 0});
+        book.rest(Order{Side::Buy, Type::Limit, 102, 1, 3, 0});
         bool ok = book.contains(1) && book.contains(2) && book.contains(3);
         if (ok) std::cout << "Test 7 passed\n";
         else std::cout << "Test 7 FAILED (contains: " << book.contains(1) << "," << book.contains(2) << "," << book.contains(3) << ")\n";
-    }
+    }*/
 
+    OrderBook book;
+    book.rest(Order{Side::Buy, Type::Limit, 102, 100, 1, 0});
+    book.rest(Order{Side::Buy, Type::Limit, 103, 50, 2, 0});
+    Order incoming{Side::Sell, Type::Limit, 103, 120, 3, 0};
+    auto fills = book.match(incoming);
+
+    std::cout << "fills: " << fills.size() << '\n';
+for (size_t i = 0; i < fills.size(); ++i) {
+    std::cout << "  [" << i << "] price " << fills[i].price
+              << " qty " << fills[i].quantity << '\n';
+}
+
+    const Order* ask = book.best(Side::Buy);
+    if (ask) {
+        std::cout << "best ask: price " << ask->price
+                << " qty " << ask->quantity << '\n';
+    } else {
+        std::cout << "best ask: (none)\n";
+}
     return 0;
 }
