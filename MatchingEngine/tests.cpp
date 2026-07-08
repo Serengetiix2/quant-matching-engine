@@ -98,19 +98,23 @@ bool runReplayTest(
 
 
 int main(){
-    std::vector<Order> buyAggressorOrders {{Side::Buy,Type::Limit, 102, 100, 1, 0}, 
-                                {Side::Buy, Type::Limit, 103, 50, 2, 0},
-                                {Side::Sell, Type::Limit,103, 120, 3, 0 }};
-    std::vector<OrderBook::Fill> buyAggressorFills {{103, 50, 3, 2},{102, 70, 3, 1}};
-    std::vector<OrderBook::ExpectedLevel> buyAggressorLevels {{Side::Buy, 102, 30}};
-    runReplayTest("canonical buy", buyAggressorOrders, buyAggressorFills, buyAggressorLevels);
+    std::vector<Order> buyAggressorOrders {
+        {Side::Sell, Type::Limit, 102, 100, 1, 0},
+        {Side::Sell, Type::Limit, 103, 50, 2, 0},
+        {Side::Buy, Type::Limit, 103, 90, 3, 0}
+    };
+    std::vector<OrderBook::Fill> buyAggressorFills {{102, 90, 3, 1}};
+    std::vector<OrderBook::ExpectedLevel> buyAggressorLevels {{Side::Sell, 102, 10}};
+    runReplayTest("buy aggressor", buyAggressorOrders, buyAggressorFills, buyAggressorLevels);
 
-    std::vector<Order> sellAggressorOrders {{Side::Buy, Type::Limit, 102, 100, 1, 0},
-                                            {Side::Buy, Type::Limit, 103, 50, 2, 0},
-                                            {Side::Sell, Type::Limit, 103, 120, 3, 0}};
-    std::vector<OrderBook::Fill> sellAggressorFills {{103, 50, 3, 2},{102, 70, 3, 1}};
-    std::vector<OrderBook::ExpectedLevel> sellAggressorLevels {{Side::Buy, 102, 30}};
-    runReplayTest("canonical sell", sellAggressorOrders, sellAggressorFills, sellAggressorLevels);
+    std::vector<Order> sellAggressorOrders {
+        {Side::Buy, Type::Limit, 103, 100, 1, 0},
+        {Side::Buy, Type::Limit, 102, 50, 2, 0},
+        {Side::Sell, Type::Limit, 103, 90, 3, 0}
+    };
+    std::vector<OrderBook::Fill> sellAggressorFills {{103, 90, 3, 1}};
+    std::vector<OrderBook::ExpectedLevel> sellAggressorLevels {{Side::Buy, 103, 10}};
+    runReplayTest("sell aggressor", sellAggressorOrders, sellAggressorFills, sellAggressorLevels);
 
     std::vector<Order> restRemainderOrders {{Side::Sell, Type::Limit, 100, 100, 1, 0},
                                              {Side::Sell, Type::Limit, 105, 50, 2, 0},
