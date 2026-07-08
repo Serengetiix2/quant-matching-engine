@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <iostream>
 #include <algorithm>
+#include <optional>
 #include "orderClass.hpp"
 
 using Price = int64_t;
@@ -14,6 +15,7 @@ using orderIterator = std::list<Order>::iterator;
 
 struct level{
     std::list<Order> orders;
+    //orderIterator iterator;
 };
 
 class OrderBook{
@@ -36,6 +38,7 @@ public:
     bool contains(Id id) const {
         return cancelIndex.find(id) != cancelIndex.end();
     }
+
     template <typename BookSide>
         orderIterator restInto(BookSide& book, Order& o){
             auto& lst = book[o.price].orders;
@@ -135,6 +138,41 @@ public:
             }
             return levelQty;
         }
+    }
+
+    template <typename F>
+    auto withGetSide(const Order& incoming, F&& fn) {
+        if (incoming.side == Side::Buy) {
+            return fn(bids);
+        } else {
+            return fn(asks);
+        }
+    }
+
+     bool cancel(Id id){
+        auto it = cancelIndex.find(id);
+        if(it == cancelIndex.end()) return false;
+        orderIterator orderIt = it->second;
+        const Price p = orderIt-> price;
+        const Order& order = *orderIt;
+        
+
+        
+
+        withGetSide(order, [&](auto& map) {
+            //std::list<Order>::erase(orderIt);
+           if(map.find(order.price) != map.end()) {
+            map.at(order.price).orders.erase(orderIt);
+                if(map.at(p).orders.empty()){
+                    map.erase(p);
+                }
+           }
+            
+        });
+        
+
+        cancelIndex.erase(it);
+        return true;
     }
 
     
