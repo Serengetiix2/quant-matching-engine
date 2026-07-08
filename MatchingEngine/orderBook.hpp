@@ -2,6 +2,7 @@
 #include <map>
 #include <unordered_map>
 #include <list>
+#include <vector>
 #include <cstdint>
 #include <iostream>
 #include <algorithm>
@@ -74,12 +75,18 @@ public:
         }
     }
 
-    std::vector<Fill> match(Order& incoming){
+    std::vector<Fill> submit(Order& incoming){
         std::vector<Fill> fills;
         withOppositeSide(incoming, [&](auto& oppositeSide) {
             while (incoming.quantity > 0 && !oppositeSide.empty()) {
                Order& resting = oppositeSide.begin()->second.orders.front();
-                        if (incoming.price >= resting.price) {
+               bool crosses;
+               if (incoming.type == Type::Market){
+                crosses = true;
+               } else {
+                crosses = incoming.price >= resting.price;
+               }
+                    if (!crosses) break;
                     int64_t tradeQty = std::min(incoming.quantity, resting.quantity);
                     incoming.quantity -= tradeQty;
                     resting.quantity -= tradeQty;
@@ -92,17 +99,43 @@ public:
                             oppositeSide.erase(oppositeSide.begin());
                         }
                     }
-                } else if (incoming.type == Type::Limit) {
-                    break;
-                }
-            }
+                
+            
+        }
         });
 
-        if (incoming.type == Type::Limit) {
+        if (incoming.type == Type::Limit && incoming.quantity > 0) {
             rest(incoming);
-        } else {
-            std::cout << " order " << incoming.id << " has been dropped" << "\n";
         }
         return fills;
     }
+
+    struct ExpectedLevel {
+        Side side;
+        Price price;
+        int64_t quantity;
+    };
+
+    int64_t quantityAt(Side side, Price price) const{
+        int64_t levelQty = 0;
+        if(side == Side::Buy){
+            if(bids.find(price) != bids.end()){
+             auto const& priceLevel = bids.at(price).orders;
+             for(auto i : priceLevel){
+                levelQty += i.quantity;
+             }
+            }
+            return levelQty;
+        }else{
+            if(asks.find(price) != asks.end()){
+                auto const& priceLevel = asks.at(price).orders;
+                for(auto const& i : priceLevel){
+                    levelQty += i.quantity;
+                }
+            }
+            return levelQty;
+        }
+    }
+
+    
 };

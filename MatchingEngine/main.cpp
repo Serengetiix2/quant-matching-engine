@@ -81,23 +81,13 @@ int main() {
     }*/
 
     OrderBook book;
-    book.rest(Order{Side::Buy, Type::Limit, 102, 100, 1, 0});
-    book.rest(Order{Side::Buy, Type::Limit, 103, 50, 2, 0});
-    Order incoming{Side::Sell, Type::Limit, 103, 120, 3, 0};
-    auto fills = book.match(incoming);
+    book.rest(Order{Side::Sell, Type::Limit, 102, 100, 1, 0});
+    book.rest(Order{Side::Sell, Type::Limit, 102, 50, 2, 0});
+    book.rest(Order{Side::Buy, Type::Limit, 102, 120, 3, 0});
 
-    std::cout << "fills: " << fills.size() << '\n';
-for (size_t i = 0; i < fills.size(); ++i) {
-    std::cout << "  [" << i << "] price " << fills[i].price
-              << " qty " << fills[i].quantity << '\n';
-}
+    std::cout << book.quantityAt(Side::Sell, 999) << "\n";
+    std::cout << book.quantityAt(Side::Sell, 102) << "\n";
+    std::cout << book.quantityAt(Side::Buy, 102) << "\n"; 
+    
 
-    const Order* ask = book.best(Side::Buy);
-    if (ask) {
-        std::cout << "best ask: price " << ask->price
-                << " qty " << ask->quantity << '\n';
-    } else {
-        std::cout << "best ask: (none)\n";
-}
-    return 0;
 }
