@@ -78,7 +78,9 @@ struct Test {
         std::vector<OrderBook::Fill> actualFills;
         for (auto& order : orders) {
             auto fills = book.submit(order);
-            actualFills.insert(actualFills.end(), fills.begin(), fills.end());
+            if(fills.has_value()){
+                actualFills.insert(actualFills.end(), fills->begin(), fills->end());
+            }
         }
         return actualFills;
     }
@@ -226,7 +228,7 @@ struct Test {
         auto actualFills = submitAndCollect(book, matcherOrders);
         auto failures = compareFills(actualFills, expectedFills);
        
-        // INLINE STATE CHECK: No helper function needed!
+        
         for (const auto& state : expectedState) {
             int actualQty = book.quantityAt(state.side, state.price);
             if (actualQty != state.quantity) {
@@ -256,7 +258,7 @@ struct Test {
 int main() {
     Test t;
 
-    /*std::vector<Order> buyAggressorOrders {
+    std::vector<Order> buyAggressorOrders {
         {Side::Sell, Type::Limit, 102, 100, 1, 0},
         {Side::Sell, Type::Limit, 103, 50, 2, 0},
         {Side::Buy, Type::Limit, 103, 90, 3, 0}
@@ -321,7 +323,7 @@ int main() {
 
     std::vector<Order> cancelLastAtPriceSequence {
         {Side::Buy, Type::Limit, 100, 50, 1, 0}
-    };*/
+    };
 
     std::vector<Order> reduceKeepPosOrders{
         {Side::Sell, Type::Limit, 100, 100, 1, 0},
@@ -417,6 +419,8 @@ int main() {
     };
     t.modifyTest("Modify Unknown ID", modifyUnknownIdOrders, modifyUnknownIdMods, modifyUnknownIdMatcher, modifyUnknownIdFills, modifyUnknownIdStates);
 
+
+
     std::vector<Order> MultiLevelOrders{
         {Side::Sell, Type::Limit, 100, 25, 1, 0},
         {Side::Sell, Type::Limit, 101, 25, 2, 0},
@@ -455,6 +459,22 @@ int main() {
     };
 
     t.runReplayTest("Exact Match Boundary", ExactMatchOrders, ExactMatchFills, ExactMatchLevels);
+
+    std::vector<Order> crossCheck{
+        {Side::Buy, Type::Limit, 100, 50, 1, 0},
+        {Side::Sell, Type::Limit, 95, 20, 2, 0},
+    };
+
+    std::vector<OrderBook::Fill> crossCheckFills{
+        {100, 20, 2, 1}
+    };
+
+    std::vector<OrderBook::ExpectedLevel> crossCheckLevels{
+        {Side::Buy, 100, 30},
+        {Side::Sell, 95, 0}
+    };
+    t.runReplayTest("Cross Comparision Check", crossCheck, crossCheckFills, crossCheckLevels);
+
     /*std::vector<Id> cancelLastAtPriceIds {1};
     std::vector<Id> cancelLastAtPriceExpected {1};
     std::vector<OrderBook::ExpectedLevel> cancelLastAtPriceLevels {};

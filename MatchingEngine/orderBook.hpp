@@ -28,6 +28,18 @@ private:
     int64_t nextSeq = 0;
 
 public:
+
+
+    bool validate(const Order& o){
+        if(contains(o.id)) return false;
+        else if(o.quantity <= 0) return false;
+        else if(o.type == Type::Limit){
+            if(o.price <= 0) return false;
+            else return true;
+        }
+        else return true;
+    }
+
    const Order* best(Side s) const {
         if (s == Side::Buy) {
             if (!bids.empty()) return &bids.begin()->second.orders.front();
@@ -48,13 +60,16 @@ public:
     }
 
     
-    void rest(Order o){
-        o.seq = nextSeq++;
+    bool rest(Order o){
+        if(!(validate(o))) return false;
+            o.seq = nextSeq++;
         orderIterator it;
         if (o.side == Side::Buy) it = restInto(bids, o);
         else                     it = restInto(asks, o);
 
         cancelIndex[o.id] = it;
+        
+        return true;
     }
 
     struct Fill{
@@ -79,8 +94,9 @@ public:
             return fn(bids);
         }
     }
-
-    std::vector<Fill> submit(Order& incoming){
+ 
+    std::optional<std::vector<Fill>> submit(Order& incoming){
+        if(!validate(incoming)) return std::nullopt;
         std::vector<Fill> fills;
         withOppositeSide(incoming, [&](auto& oppositeSide) {
             while (incoming.quantity > 0 && !oppositeSide.empty()) {
@@ -89,7 +105,11 @@ public:
                if (incoming.type == Type::Market){
                 crosses = true;
                } else {
-                crosses = incoming.price >= resting.price;
+                if(incoming.side == Side::Buy){
+                    crosses = incoming.price >= resting.price;
+                }else{
+                    crosses = resting.price >= incoming.price;
+                }
                }
                     if (!crosses) break;
                     int64_t tradeQty = std::min(incoming.quantity, resting.quantity);
@@ -105,7 +125,7 @@ public:
                         }
                     }
                 
-                    
+
             
         }
         });
