@@ -1,8 +1,5 @@
-#include <vector>
-#include <unordered_map>
-#include <iostream>
-#include <stack>
 
+using namespace std;
 
 /*class solution{
 public:
@@ -83,7 +80,7 @@ public:
 
 
 
-class Solution {
+/*class Solution {
 public:
     vector<int> nextGreaterElement(vector<int>& nums1, vector<int>& nums2) {
         std::vector<int> ans (nums1.size(),-1);
@@ -103,5 +100,19 @@ public:
         --i;
         }
          return ans;
+    }
+};*/
+
+class Solution {
+public:
+    std::vector<vector<string>> groupAnagrams(vector<string>& strs) {
+       std::unordered_map<string, vector<string>> map;
+        vector<vector<string>> result;
+
+        for (auto s : strs) {
+            auto sortedKey = std::sort(s.begin(), s.end);
+            map[sortedKey].push_back(s);
+        }
+        return result;
     }
 };

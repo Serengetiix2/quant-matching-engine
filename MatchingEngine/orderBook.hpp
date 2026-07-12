@@ -7,9 +7,11 @@
 #include <iostream>
 #include <algorithm>
 #include <optional>
+#include <any>
 #include "orderClass.hpp"
 
 using Price = int64_t;
+using Quantity = int64_t;
 using Id = int64_t;
 using orderIterator = std::list<Order>::iterator;
 
@@ -103,6 +105,7 @@ public:
                         }
                     }
                 
+                    
             
         }
         });
@@ -174,6 +177,50 @@ public:
         cancelIndex.erase(it);
         return true;
     }
+
+        
+    
+
+   bool  modify(Id id, std::optional<Price> newPrice, std::optional<Quantity> newQuantity){
+        auto it = cancelIndex.find(id);
+        if (it == cancelIndex.end()) return false;
+        if(newQuantity == 0){
+            cancel(id);
+            return true;
+        } 
+        orderIterator orderIt = it->second;
+        Order& order = *orderIt;
+        Price currentPrice = orderIt->price;
+        Quantity currentQuantity = orderIt->quantity;
+        Side currentSide = orderIt->side;
+
+        if(newPrice.has_value() && *newPrice != order.price){
+            cancel(id);
+            currentPrice = *newPrice;
+            if(newQuantity.has_value()){
+            currentQuantity = *newQuantity;
+            }
+            Order replacement{currentSide, Type::Limit, currentPrice, currentQuantity, id, 0};
+            submit(replacement);
+            return true;
+        
+        }else if(newQuantity.has_value()){
+                if(*newQuantity >  currentQuantity){
+                    cancel(id);
+                    currentQuantity = *newQuantity;
+                    Order replacement{currentSide, Type::Limit, currentPrice, currentQuantity, id, 0};
+                    submit(replacement);
+                }else if(order.quantity > *newQuantity){
+                    order.quantity = *newQuantity;
+                }
+                return true;
+        }else{
+            return false;
+        }
+           
+
+        
+   }
 
     
 };
