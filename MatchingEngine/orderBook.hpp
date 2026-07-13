@@ -127,11 +127,10 @@ public:
                     fills.emplace_back(resting->price, tradeQty, incoming.id, resting->id);
 
                     if (resting->quantity == 0) {
-                        oppositeSide.begin()->second.orders.pop_front();
-                        cancelIndex.erase(resting->id);
-                        if (oppositeSide.begin()->second.orders.empty()) {
-                        oppositeSide.erase(oppositeSide.begin());
-                        }
+                        Id restingId = resting->id;
+                        cancel(restingId);
+                        //std::println("Remaining Levels" , oppositeSide.size());
+                        //std::println("Next Price Level", oppositeSide.begin()->first);
                     }
                 
 
@@ -178,7 +177,7 @@ public:
         const Price p = orderIt-> price;
         const Order& order = *orderIt;
         
-        auto map = getMap(order.side);
+        auto& map = getMap(order.side);
 
            if(map.find(order.price) != map.end()) {
             map.at(order.price).orders.erase(orderIt);
