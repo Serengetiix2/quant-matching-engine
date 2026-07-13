@@ -23,11 +23,27 @@ struct level{
 class OrderBook{
 private:
     std::map<Price, level> asks;
-    std::map<Price, level, std::greater<>> bids;
+    std::map<Price, level> bids;
     std::unordered_map<Id,orderIterator> cancelIndex;
     int64_t nextSeq = 0;
 
 public:
+
+    std::map<Price, level>& getMap(Side side){
+        if(side == Side::Buy){
+            return bids;
+        }else{
+            return asks;
+        }
+    }
+
+    Side opposite(Side side){
+        if(side == Side::Buy){
+            return Side::Sell;
+        }else{
+            return Side::Buy;
+        }
+    }
 
 
     bool validate(const Order& o){
@@ -40,9 +56,9 @@ public:
         else return true;
     }
 
-   const Order* best(Side s) const {
+   Order* best(Side s) {
         if (s == Side::Buy) {
-            if (!bids.empty()) return &bids.begin()->second.orders.front();
+            if (!bids.empty()) return &bids.rbegin()->second.orders.front();
         } else {
             if (!asks.empty()) return &asks.begin()->second.orders.front();
         }
@@ -86,49 +102,41 @@ public:
             
     
     };
-    template <typename F>
-    auto withOppositeSide(Order& incoming, F&& fn) {
-        if (incoming.side == Side::Buy) {
-            return fn(asks);
-        } else {
-            return fn(bids);
-        }
-    }
+    
  
     std::optional<std::vector<Fill>> submit(Order& incoming){
         if(!validate(incoming)) return std::nullopt;
         std::vector<Fill> fills;
-        withOppositeSide(incoming, [&](auto& oppositeSide) {
+        auto& oppositeSide = getMap(opposite(incoming.side));
             while (incoming.quantity > 0 && !oppositeSide.empty()) {
-               Order& resting = oppositeSide.begin()->second.orders.front();
+               auto resting = best(opposite(incoming.side));
                bool crosses;
                if (incoming.type == Type::Market){
                 crosses = true;
                } else {
                 if(incoming.side == Side::Buy){
-                    crosses = incoming.price >= resting.price;
+                    crosses = incoming.price >= resting->price;
                 }else{
-                    crosses = resting.price >= incoming.price;
+                    crosses = resting->price >= incoming.price;
                 }
                }
                     if (!crosses) break;
-                    int64_t tradeQty = std::min(incoming.quantity, resting.quantity);
+                    int64_t tradeQty = std::min(incoming.quantity, resting->quantity);
                     incoming.quantity -= tradeQty;
-                    resting.quantity -= tradeQty;
-                    fills.emplace_back(resting.price, tradeQty, incoming.id, resting.id);
+                    resting->quantity -= tradeQty;
+                    fills.emplace_back(resting->price, tradeQty, incoming.id, resting->id);
 
-                    if (resting.quantity == 0) {
+                    if (resting->quantity == 0) {
                         oppositeSide.begin()->second.orders.pop_front();
-                        cancelIndex.erase(resting.id);
+                        cancelIndex.erase(resting->id);
                         if (oppositeSide.begin()->second.orders.empty()) {
-                            oppositeSide.erase(oppositeSide.begin());
+                        oppositeSide.erase(oppositeSide.begin());
                         }
                     }
                 
 
             
         }
-        });
 
         if (incoming.type == Type::Limit && incoming.quantity > 0) {
             rest(incoming);
@@ -163,15 +171,6 @@ public:
         }
     }
 
-    template <typename F>
-    auto withGetSide(const Order& incoming, F&& fn) {
-        if (incoming.side == Side::Buy) {
-            return fn(bids);
-        } else {
-            return fn(asks);
-        }
-    }
-
      bool cancel(Id id){
         auto it = cancelIndex.find(id);
         if(it == cancelIndex.end()) return false;
@@ -179,11 +178,8 @@ public:
         const Price p = orderIt-> price;
         const Order& order = *orderIt;
         
+        auto map = getMap(order.side);
 
-        
-
-        withGetSide(order, [&](auto& map) {
-            //std::list<Order>::erase(orderIt);
            if(map.find(order.price) != map.end()) {
             map.at(order.price).orders.erase(orderIt);
                 if(map.at(p).orders.empty()){
@@ -191,9 +187,6 @@ public:
                 }
            }
             
-        });
-        
-
         cancelIndex.erase(it);
         return true;
     }

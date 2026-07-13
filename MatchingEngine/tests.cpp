@@ -46,6 +46,7 @@ struct Test {
 
     using Result = std::variant<bool, std::vector<Failure>>;
 
+
     std::vector<Failure> compareFills(
         const std::vector<OrderBook::Fill>& actualFills, 
         const std::vector<OrderBook::Fill>& expectedFills) {
@@ -83,6 +84,14 @@ struct Test {
             }
         }
         return actualFills;
+    }
+    bool ValidationTest(OrderBook& book, std::vector<Order>& orders, const std::vector<bool>& expectedAcceptances){
+        for(size_t i = 0; i < orders.size(); ++i){
+            auto submission = book.submit(orders[i]);
+            if(submission.has_value() != expectedAcceptances[i]) return false;
+        }
+
+        return true;
     }
 
     bool runReplayTest(const std::string& name,
@@ -251,6 +260,8 @@ struct Test {
                   << "  Failures: " << failures << "\n";
         return false;
     }
+
+
     
 };
 
@@ -474,6 +485,49 @@ int main() {
         {Side::Sell, 95, 0}
     };
     t.runReplayTest("Cross Comparision Check", crossCheck, crossCheckFills, crossCheckLevels);
+
+    OrderBook dupIdBook;
+    std::vector<Order> dupIdOrders{
+        {Side::Buy, Type::Limit, 100, 50, 1, 0},
+        {Side::Buy, Type::Limit, 100, 30, 1, 0}
+    };
+    std::vector<bool> dupIdExpected{true, false};
+    
+    bool passedDup = t.ValidationTest(dupIdBook, dupIdOrders, dupIdExpected);
+    if (passedDup && dupIdBook.quantityAt(Side::Buy, 100) == 50) {
+        std::cout << "Passed Duplicate ID Test!\n";
+    } else {
+        std::cout << "FAILED Duplicate ID Test\n";
+    }
+
+    OrderBook badQtyBook;
+    std::vector<Order> badQtyOrders{
+        {Side::Sell, Type::Limit, 100, 0, 1, 0},
+        {Side::Sell, Type::Limit, 100, -10, 2, 0}
+    };
+    std::vector<bool> badQtyExpected{false, false};
+    
+    bool passedBadQty = t.ValidationTest(badQtyBook, badQtyOrders, badQtyExpected);
+    if (passedBadQty && badQtyBook.quantityAt(Side::Sell, 100) == 0) {
+        std::cout << "Passed Bad Quantity Test!\n";
+    } else {
+        std::cout << "FAILED Bad Quantity Test\n";
+    }
+
+    OrderBook badPriceBook;
+    std::vector<Order> badPriceOrders{
+        {Side::Buy, Type::Limit, 0, 50, 1, 0},
+        {Side::Buy, Type::Limit, -5, 50, 2, 0},
+        {Side::Buy, Type::Market, 0, 50, 3, 0}
+    };
+    std::vector<bool> badPriceExpected{false, false, true}; 
+    
+    bool passedBadPrice = t.ValidationTest(badPriceBook, badPriceOrders, badPriceExpected);
+    if (passedBadPrice) {
+        std::cout << "Passed Bad Price Test!\n";
+    } else {
+        std::cout << "FAILED Bad Price Test\n";
+    }
 
     /*std::vector<Id> cancelLastAtPriceIds {1};
     std::vector<Id> cancelLastAtPriceExpected {1};
