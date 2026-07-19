@@ -3,7 +3,8 @@
 #include <string>
 #include <optional>
 #include <iostream>
-
+#include <random>
+#include <chrono>
 
 std::ostream& operator<<(std::ostream& os, const OrderBook::Fill& fill) {
     os << "(" << fill.price << "," << fill.quantity << "," << fill.agressorId << "," << fill.restingId << ")";
@@ -23,6 +24,12 @@ std::ostream& operator<<(std::ostream& os, const std::vector<S>& vector) {
     }
     return os;
 }
+
+ struct generator{
+        std::mt19937 rng;
+        std::vector<Id> restingIds;
+        Id nextId = 1;
+    };
 
 struct Test {
     struct Modifications {
@@ -149,12 +156,12 @@ struct Test {
         return false;
     }
 
-    bool CancelTest(const std::vector<Order>& sequence,
+    bool CancelTest(std::vector<Order>& sequence,
                     const std::vector<Id>& ids,
                     const std::vector<Id>& expectedCancels,
                     const std::vector<OrderBook::ExpectedLevel>& expectedState) {
         OrderBook book;
-        for (const auto& o : sequence) {
+        for (auto& o : sequence) {
             book.rest(o);
         }
 
@@ -224,7 +231,7 @@ struct Test {
         const std::vector<Modifications>& orderChanges,
         std::vector<Order>& matcherOrders,
         const std::vector<OrderBook::Fill>& expectedFills,
-        const std::vector<OrderBook::ExpectedLevel>& expectedState) { // Added expectedState
+        const std::vector<OrderBook::ExpectedLevel>& expectedState) { 
 
         OrderBook book;
         for (auto& order : setup) {
@@ -262,14 +269,152 @@ struct Test {
     }
 
 
+    void generateAndExecute(OrderBook& book, generator& gen, int iterations){
+        std::uniform_int_distribution<int> sideDist(0, 1);
+        std::uniform_int_distribution<int> typeDist(0, 9);
+        std::uniform_int_distribution<int> priceDist(1, 100);
+        std::uniform_int_distribution<int> quantityDist(1, 100);
+        std::uniform_int_distribution<int> operationDist(0, 99);
+        std::uniform_int_distribution<int> PriceChangeChance(0, 5);
+        std::uniform_int_distribution<int> QuantityChangeChance(0, 5);
+        
+         
+        for(int i = 0; i < iterations; ++i){
+            if(gen.restingIds.empty()){
+                Order o{sideDist(gen.rng) == 0 ? Side::Buy : Side::Sell,
+                        typeDist(gen.rng) != 9 ? Type::Limit : Type::Market,
+                        priceDist(gen.rng),
+                        quantityDist(gen.rng),
+                        gen.nextId++,
+                        0};
+                book.submit(o);
+                gen.restingIds.push_back(o.id);
+            } else{
+                std::uniform_int_distribution<size_t> indexDist(0, gen.restingIds.size() - 1);
+                auto operation = operationDist(gen.rng);
+                if( operation >= 50 && operation <= 79){
+                   Order o{sideDist(gen.rng) == 0 ? Side::Buy : Side::Sell,
+                    typeDist(gen.rng) != 9 ? Type::Limit : Type::Market,
+                    priceDist(gen.rng),
+                    quantityDist(gen.rng),
+                    gen.nextId++
+                   };
+                   auto result = book.submit(o);
+                   if(result.has_value() && o.type == Type::Limit){
+                    gen.restingIds.push_back(o.id);
+                   }
+
+                   /*std::cout << "[Iter " << i << "] SUBMIT: " 
+                         << (o.type == Type::Limit ? "Limit " : "Market ")
+                         << (o.side == Side::Buy ? "Buy" : "Sell") 
+                         << " ID " << o.id << " (" << o.quantity << " @ " << o.price << ")\n";*/
+                    
+                }
+                if(operation >= 80 && operation <= 99){
+                    size_t idx = indexDist(gen.rng);
+                    Id idToCancel = gen.restingIds[idx];
+                    book.cancel(idToCancel);
+                    gen.restingIds.erase(gen.restingIds.begin() + idx);
+
+                    //std::cout << "[Iter " << i << "] CANCEL: ID " << idToCancel << "\n";
+                }
+                if(operation >= 0 && operation <= 49){
+                    size_t idx = indexDist(gen.rng);
+                    Id idToModify = gen.restingIds[idx];
+                    auto orderInfo = book.getOrderInfo(idToModify);
+                    if(orderInfo == std::nullopt) continue;
+                    std::optional<Price> newPrice;
+                    std::optional<Quantity> newQuantity;
+                    std::uniform_int_distribution<int> PriceChangePercent(0, 20);
+                    std::uniform_int_distribution<int> QuantityChangePercent(0, 20);
+                    if(PriceChangeChance(gen.rng) > 1){
+                       auto change = 1 + PriceChangePercent(gen.rng)/ 100.0;
+                        newPrice = (orderInfo->price * change);
+                        //newPrice = (priceDist(gen.rng));
+                    }
+                    if(QuantityChangeChance(gen.rng) > 1){
+                        int change = 1 + QuantityChangePercent(gen.rng)/ 100.0;
+                        newQuantity = (orderInfo->quantity * change);
+                        //newQuantity = (quantityDist(gen.rng));
+                    }
+                    book.modify(idToModify, newPrice, newQuantity);
+                    if(!book.contains(idToModify)){
+                        gen.restingIds.erase(gen.restingIds.begin() + idx);
+                    }
+                    /*std::cout << "[Iter " << i << "] MODIFY: ID " << idToModify 
+                        << " (NewPrice: " << (newPrice ? std::to_string(*newPrice) : "None")
+                        << ", NewQty: " << (newQuantity ? std::to_string(*newQuantity) : "None") << ")\n";*/
+                }
+            }
+
+            //if(book.checkNoCrossedBook()) std::cout << "CROSSED BOOK DETECTED at iteration " << i << "\n";
+            //if(book.checkNoOrphans() != std::nullopt) std::cout << "ORPHANED ORDER DETECTED at iteration " << i << "\n";
+            //if(!book.checkFIFO()) std::cout << "FIFO VIOLATION DETECTED at iteration " << i << "\n";
+    }
+
+}
+
+#include <chrono>
+
+void runTrueBenchmark(OrderBook& book, generator& gen, int iterations) {
+    // 1. SETUP: Generate all orders ahead of time to remove RNG overhead
+    std::vector<Order> preGenerated;
+    preGenerated.reserve(iterations);
     
+    std::uniform_int_distribution<int> sideDist(0, 1);
+    std::uniform_int_distribution<int> typeDist(0, 9);
+    std::uniform_int_distribution<int> priceDist(1, 100);
+    std::uniform_int_distribution<int> quantityDist(1, 100);
+
+    for(int i = 0; i < iterations; ++i) {
+        preGenerated.emplace_back(
+            sideDist(gen.rng) == 0 ? Side::Buy : Side::Sell,
+            typeDist(gen.rng) != 9 ? Type::Limit : Type::Market,
+            priceDist(gen.rng),
+            quantityDist(gen.rng),
+            gen.nextId++,
+            0
+        );
+    }
+
+    std::cout << "Data pre-generated. Starting benchmark...\n";
+
+    // 2. WARMUP: Run a few to wake up the CPU cache
+    for(int i = 0; i < 1000; ++i) {
+        Order copy = preGenerated[i];
+        book.submit(copy);
+    }
+
+    // 3. START THE CLOCK
+    auto start = std::chrono::high_resolution_clock::now();
+
+    // 4. THE HOT PATH
+    for(int i = 1000; i < iterations; ++i) {
+        Order o = preGenerated[i]; 
+        book.submit(o);
+    }
+
+    // 5. STOP THE CLOCK
+    auto end = std::chrono::high_resolution_clock::now();
+    
+    auto duration_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+    int actual_ops = iterations - 1000;
+
+    std::cout << "-----------------------------------\n";
+    std::cout << "Operations Executed: " << actual_ops << "\n";
+    std::cout << "Total Time: " << duration_ns / 1'000'000.0 << " ms\n";
+    std::cout << "Average Latency: " << duration_ns / actual_ops << " ns/order\n";
+    std::cout << "Operations/Second: " << (actual_ops * 1'000'000'000LL) / duration_ns << "\n";
+    std::cout << "-----------------------------------\n";
+}
+
 };
 
 
-int main() {
+int main(){
     Test t;
 
-    std::vector<Order> buyAggressorOrders {
+    /*std::vector<Order> buyAggressorOrders {
         {Side::Sell, Type::Limit, 102, 100, 1, 0},
         {Side::Sell, Type::Limit, 103, 50, 2, 0},
         {Side::Buy, Type::Limit, 103, 90, 3, 0}
@@ -529,11 +674,15 @@ int main() {
         std::cout << "FAILED Bad Price Test\n";
     }
 
-    /*std::vector<Id> cancelLastAtPriceIds {1};
+    std::vector<Id> cancelLastAtPriceIds {1};
     std::vector<Id> cancelLastAtPriceExpected {1};
     std::vector<OrderBook::ExpectedLevel> cancelLastAtPriceLevels {};
     t.CancelTest(cancelLastAtPriceSequence, cancelLastAtPriceIds, cancelLastAtPriceExpected, cancelLastAtPriceLevels);*/
 
+    generator gen;
+    OrderBook book;
+    //t.generateAndExecute(book, gen, 100000);
+    t.runTrueBenchmark(book, gen, 100000);
 
 
     return 0;

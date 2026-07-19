@@ -45,6 +45,13 @@ public:
         }
     }
 
+    std::optional<Order> getOrderInfo(Id id) const{
+        auto it = cancelIndex.find(id);
+        if (it == cancelIndex.end()) return std::nullopt;
+        orderIterator orderIt = it->second;
+        return Order{orderIt->side, orderIt->type, orderIt->price, orderIt->quantity, id, orderIt->seq};
+    }
+
 
     bool validate(const Order& o){
         if(contains(o.id)) return false;
@@ -64,6 +71,15 @@ public:
         }
         return nullptr;
     }
+
+   const Order* best(Side s) const {
+        if (s == Side::Buy) {
+            if (!bids.empty()) return &bids.rbegin()->second.orders.front();
+        } else {
+            if (!asks.empty()) return &asks.begin()->second.orders.front();
+        }
+        return nullptr;
+    }
    
     bool contains(Id id) const {
         return cancelIndex.find(id) != cancelIndex.end();
@@ -76,7 +92,7 @@ public:
     }
 
     
-    bool rest(Order o){
+    bool rest(Order& o){
         if(!(validate(o))) return false;
             o.seq = nextSeq++;
         orderIterator it;
@@ -124,13 +140,14 @@ public:
                     int64_t tradeQty = std::min(incoming.quantity, resting->quantity);
                     incoming.quantity -= tradeQty;
                     resting->quantity -= tradeQty;
+                    /*std::cout << "FILL: " << tradeQty << " @ " << resting->price 
+                              << " (Aggressor ID: " << incoming.id 
+                              << ", Resting ID: " << resting->id << ")\n";*/
                     fills.emplace_back(resting->price, tradeQty, incoming.id, resting->id);
 
                     if (resting->quantity == 0) {
                         Id restingId = resting->id;
                         cancel(restingId);
-                        //std::println("Remaining Levels" , oppositeSide.size());
-                        //std::println("Next Price Level", oppositeSide.begin()->first);
                     }
                 
 
@@ -154,7 +171,7 @@ public:
         if(side == Side::Buy){
             if(bids.find(price) != bids.end()){
              auto const& priceLevel = bids.at(price).orders;
-             for(auto i : priceLevel){
+             for(const auto& i : priceLevel){
                 levelQty += i.quantity;
              }
             }
@@ -233,6 +250,67 @@ public:
 
         
    }
+
+   std::optional<std::vector<Order>> checkNoCrossedBook() const{
+    
+        const Order* bestBid = best(Side::Buy);
+        const Order* bestAsk = best(Side::Sell);
+
+        if(bestBid == nullptr || bestAsk == nullptr){
+            return std::nullopt;
+        }
+
+        if(bestBid->price >= bestAsk->price){
+          return std::vector<Order> {*bestBid, *bestAsk};  
+        }else{
+            return std::nullopt;
+        }
+    
+   }
+
+   std::optional<std::vector<Order>> checkNoOrphans() const{
+    std::vector<Order> orphans;
+    for(const auto& id : cancelIndex){
+        auto it = id.second;
+        Order&  order = *it;
+        if(id.first != order.id){
+            orphans.push_back(order);
+        }
+    }
+    if(orphans.empty()){
+        return std::nullopt;
+    }else{
+        return orphans;
+    }
+
+   }
+
+   bool checkFIFO() const{
+    for(const auto& [price, level] : bids){
+        int64_t lastSeq = -1;
+        for(const auto& order : level.orders){
+            if(lastSeq != -1 && order.seq < lastSeq){
+                return false;
+            }
+            lastSeq = order.seq;
+        }
+    }
+
+    for(const auto& [price, level] : asks){
+        int64_t lastSeq = -1;
+        for(const auto& order : level.orders){
+            if(lastSeq != -1 && order.seq < lastSeq){
+                return false;
+            }
+            lastSeq = order.seq;
+        }
+    }
+
+    return true;
+   }
+
+
+
 
     
 };
