@@ -6,6 +6,17 @@
 #include <random>
 #include <chrono>
 
+enum class OpType { Submit, Cancel, Modify};
+
+struct LoggedOp{
+
+    OpType type;
+    Order order;
+    Id id;
+    std::optional<Price> newPrice;
+    std::optional<Quantity> newQuantity;
+};
+
 std::ostream& operator<<(std::ostream& os, const OrderBook::Fill& fill) {
     os << "(" << fill.price << "," << fill.quantity << "," << fill.agressorId << "," << fill.restingId << ")";
     return os;
@@ -43,7 +54,7 @@ struct Test {
         std::string actualResult;
         std::string expectedResult;
 
-        // Placed directly inside the struct as a friend function
+        
         friend std::ostream& operator<<(std::ostream& os, const Failure& failure) {
             os << "[" << failure.failureType << " mismatch - Expected: " << failure.expectedResult 
                << ", Got: " << failure.actualResult << "]";
@@ -51,7 +62,6 @@ struct Test {
         }
     };
 
-    using Result = std::variant<bool, std::vector<Failure>>;
 
 
     std::vector<Failure> compareFills(
@@ -269,7 +279,7 @@ struct Test {
     }
 
 
-    void generateAndExecute(OrderBook& book, generator& gen, int iterations){
+    std::optional<std::vector<LoggedOp>> generateAndExecute(OrderBook& book, generator& gen, int iterations){
         std::uniform_int_distribution<int> sideDist(0, 1);
         std::uniform_int_distribution<int> typeDist(0, 9);
         std::uniform_int_distribution<int> priceDist(1, 100);
@@ -277,6 +287,7 @@ struct Test {
         std::uniform_int_distribution<int> operationDist(0, 99);
         std::uniform_int_distribution<int> PriceChangeChance(0, 5);
         std::uniform_int_distribution<int> QuantityChangeChance(0, 5);
+        std::vector<LoggedOp> history;
         
          
         for(int i = 0; i < iterations; ++i){
@@ -302,6 +313,7 @@ struct Test {
                    auto result = book.submit(o);
                    if(result.has_value() && o.type == Type::Limit){
                     gen.restingIds.push_back(o.id);
+                    history.push_back({OpType::Submit, o, o.id, std::nullopt, std::nullopt});
                    }
 
                    /*std::cout << "[Iter " << i << "] SUBMIT: " 
@@ -311,10 +323,14 @@ struct Test {
                     
                 }
                 if(operation >= 80 && operation <= 99){
+                    auto Order = book.getOrderInfo(gen.restingIds[indexDist(gen.rng)]);
                     size_t idx = indexDist(gen.rng);
                     Id idToCancel = gen.restingIds[idx];
                     book.cancel(idToCancel);
                     gen.restingIds.erase(gen.restingIds.begin() + idx);
+
+                    history.push_back({OpType::Cancel, *Order, idToCancel, std::nullopt, std::nullopt});
+
 
                     //std::cout << "[Iter " << i << "] CANCEL: ID " << idToCancel << "\n";
                 }
@@ -344,70 +360,85 @@ struct Test {
                     /*std::cout << "[Iter " << i << "] MODIFY: ID " << idToModify 
                         << " (NewPrice: " << (newPrice ? std::to_string(*newPrice) : "None")
                         << ", NewQty: " << (newQuantity ? std::to_string(*newQuantity) : "None") << ")\n";*/
+                        history.push_back({OpType::Modify, *orderInfo, idToModify, newPrice, newQuantity});
                 }
             }
 
-            //if(book.checkNoCrossedBook()) std::cout << "CROSSED BOOK DETECTED at iteration " << i << "\n";
-            //if(book.checkNoOrphans() != std::nullopt) std::cout << "ORPHANED ORDER DETECTED at iteration " << i << "\n";
-            //if(!book.checkFIFO()) std::cout << "FIFO VIOLATION DETECTED at iteration " << i << "\n";
+            
+
+            if(book.checkNoCrossedBook()){
+                return history;
+                std::cout << "CROSSED BOOK DETECTED at iteration " << i << "\n";
+            } 
+            if(book.checkNoOrphans() != std::nullopt){
+               return history;
+               std::cout << "ORPHANED ORDER DETECTED at iteration " << i << "\n"; 
+            } 
+            if(!book.checkFIFO()){
+              return history;
+              std::cout << "FIFO VIOLATION DETECTED at iteration " << i << "\n";
+  
+            } 
+
     }
+    return std::nullopt;
 
 }
 
-#include <chrono>
+bool invReplay(std::vector<LoggedOp>& sequence){
+    OrderBook book;
 
-void runTrueBenchmark(OrderBook& book, generator& gen, int iterations) {
-    // 1. SETUP: Generate all orders ahead of time to remove RNG overhead
-    std::vector<Order> preGenerated;
-    preGenerated.reserve(iterations);
-    
-    std::uniform_int_distribution<int> sideDist(0, 1);
-    std::uniform_int_distribution<int> typeDist(0, 9);
-    std::uniform_int_distribution<int> priceDist(1, 100);
-    std::uniform_int_distribution<int> quantityDist(1, 100);
+    for(int i = 0; i < sequence.size(); ++i){
+        if(sequence[i].type == OpType::Submit){
+            auto result = book.submit(sequence[i].order);
+            if(!result.has_value() && sequence[i].order.type == Type::Limit){
+                //std::cout << "Replay failed at iteration " << i << ": Submit failed for order ID " << sequence[i].order.seq << "\n";
+            }
+        }else if(sequence[i].type == OpType::Cancel){
+            bool result = book.cancel(sequence[i].id);
+            if(!result){
+                //std::cout << "Replay failed at iteration " << i << ": Cancel failed for order ID " << sequence[i].order.seq << "\n";
+            }
+        }else if(sequence[i].type == OpType::Modify){
+            bool result = book.modify(sequence[i].id, sequence[i].newPrice, sequence[i].newQuantity);
+            if(!result){
+               // std::cout << "Replay failed at iteration " << i << ": Modify failed for order ID " << sequence[i].order.seq << "\n";
+            }
+        }
+        if(book.checkNoCrossedBook()){
+                return false;
+                std::cout << "CROSSED BOOK DETECTED at iteration " << i << "\n";
+            } 
+            if(book.checkNoOrphans() != std::nullopt){
+               return false;
+               std::cout << "ORPHANED ORDER DETECTED at iteration " << i << "\n"; 
+            } 
+            if(!book.checkFIFO()){
+              return false;
+              std::cout << "FIFO VIOLATION DETECTED at iteration " << i << "\n";
+  
+            } 
+        }
+    return true;
 
-    for(int i = 0; i < iterations; ++i) {
-        preGenerated.emplace_back(
-            sideDist(gen.rng) == 0 ? Side::Buy : Side::Sell,
-            typeDist(gen.rng) != 9 ? Type::Limit : Type::Market,
-            priceDist(gen.rng),
-            quantityDist(gen.rng),
-            gen.nextId++,
-            0
-        );
     }
-
-    std::cout << "Data pre-generated. Starting benchmark...\n";
-
-    // 2. WARMUP: Run a few to wake up the CPU cache
-    for(int i = 0; i < 1000; ++i) {
-        Order copy = preGenerated[i];
-        book.submit(copy);
+    std::vector<LoggedOp> shrinker(std::vector<LoggedOp>& seq){
+        bool OpsRemoved = true;
+        while(OpsRemoved){
+            OpsRemoved = false;
+            for(int i = seq.size() - 1 ; i >= 0; --i){
+                LoggedOp removed = seq[i];
+                seq.erase(seq.begin() + i);
+                if(invReplay(seq)){
+                    seq.insert(seq.begin() + i, removed);
+                }else{
+                    std::cout << "Removed operation at index " << i << " (ID: " << removed.order.id << ")\n";
+                    OpsRemoved = true;
+                }
+            }
+        }
+        return seq;
     }
-
-    // 3. START THE CLOCK
-    auto start = std::chrono::high_resolution_clock::now();
-
-    // 4. THE HOT PATH
-    for(int i = 1000; i < iterations; ++i) {
-        Order o = preGenerated[i]; 
-        book.submit(o);
-    }
-
-    // 5. STOP THE CLOCK
-    auto end = std::chrono::high_resolution_clock::now();
-    
-    auto duration_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
-    int actual_ops = iterations - 1000;
-
-    std::cout << "-----------------------------------\n";
-    std::cout << "Operations Executed: " << actual_ops << "\n";
-    std::cout << "Total Time: " << duration_ns / 1'000'000.0 << " ms\n";
-    std::cout << "Average Latency: " << duration_ns / actual_ops << " ns/order\n";
-    std::cout << "Operations/Second: " << (actual_ops * 1'000'000'000LL) / duration_ns << "\n";
-    std::cout << "-----------------------------------\n";
-}
-
 };
 
 
@@ -681,8 +712,14 @@ int main(){
 
     generator gen;
     OrderBook book;
-    //t.generateAndExecute(book, gen, 100000);
-    t.runTrueBenchmark(book, gen, 100000);
+    auto fuzz = t.generateAndExecute(book, gen, 400000);
+    if(fuzz.has_value()){
+        std::cout << "Fuzzing detected an issue, attempting to shrink the sequence...\n";
+        auto shrunk = t.shrinker(*fuzz);
+        std::cout << "Shrunk sequence to " << shrunk.size() << " operations.\n";
+    } else {
+        std::cout << "Fuzzing completed without detecting issues.\n";
+    }
 
 
     return 0;
