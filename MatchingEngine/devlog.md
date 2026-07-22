@@ -30,14 +30,37 @@
 | `validate` / input rejection | ✅ done | 3 validation cases (dup-id, bad-qty, bad-price) |
 | Map unification (pre-W6 cleanup) | ✅ done | full 23-test suite green |
 | Property-based / invariant tests (W6·1–2) | ✅ done | 100k-op fuzzed run, 0 violations |
-| Shrinker (W6·3) | ⬜ | not yet built — nothing organic to shrink |
+| Shrinker (W6·3) | ✅ done | proven against an injected known bug, 34→20 stable ops |
 | Defence pass (W6·4) | ⬜ | — |
 
-**Status: W4 core + W5 (modify, edge cases I, validation) + map unification all COMPLETE — 23 hand-written passing tests. W6·1–2 COMPLETE: property-based fuzzer built and run — 100,000 operations (weighted toward modify), 3 active invariants checked after every single operation, ZERO violations. Correct, tested, single-threaded matching engine, now stress-tested at volume. W6·3 (shrinker) and W6·4 (defence pass) remain before concurrency.**
+**Status: W4 core + W5 (modify, edge cases I, validation) + map unification all COMPLETE — 23 hand-written passing tests. W6·1–3 COMPLETE: property-based fuzzer (100k operations, 3 invariants, zero violations) + a working shrinker, proven by deliberately injecting a known bug and reducing the resulting failing sequence to a stable minimal set. Correct, tested, single-threaded matching engine, now stress-tested at volume with a demonstrated capability to isolate any future failure automatically. Only W6·4 (defence pass) remains before concurrency.**
 
 ---
 
 ## Session entries
+
+### W6·3 — Shrinker (COMPLETE)
+
+**Why build one at all, given the 100k fuzz run found nothing organically:** raised and resolved directly. Initial instinct was that per-iteration invariant detection (which already reports *which* iteration and *which* invariant failed) makes shrinking redundant, since the failures are "process execution" problems, not data problems. The gap: detection gives you *where*, not *which prior operations were causally responsible*. In a long run, a failure at iteration 4,832 could be caused by the operation at 4,832 itself, or by something that rested at iteration 12 and sat untouched for thousands of steps. Manually reconstructing which of thousands of preceding operations are even relevant is exactly the tedious, error-prone work a shrinker automates — and a shrunk 3-5-operation reproducer is hand-traceable and droppable straight into the permanent test suite; a multi-thousand-operation trace is neither.
+
+**Capture mechanism:** `LoggedOp` — a tagged struct (`OpType::Submit/Cancel/Modify` + the fields each kind needs: `Order` for submit, `Id` for cancel, `Id` + optional new price/quantity for modify). `generateAndExecute` now appends one `LoggedOp` per iteration to a `history` vector and returns it (wrapped in `optional`, `nullopt` = clean full run) the instant any invariant fires — freezing the exact sequence that produced the failure.
+
+**`invReplay(vector<LoggedOp>&) -> bool`:** fresh `OrderBook`, executes each logged operation in order dispatching on its tag, checks all three invariants after each step; `true` = sequence replays clean, `false` = reproduces the failure. This one function is reused by both the initial capture and every step of the shrink loop.
+
+**Bugs caught while building this (a good comparison-to-plan debugging exercise in its own right):**
+- Missing braces around the three invariant `if` checks meant only the `return false;` was conditional — the diagnostic `std::cout` lines ran unconditionally every iteration regardless of outcome. Fixed with explicit braces.
+- Missing `return true;` at the end of `invReplay` for the clean-replay case — fell off the end of a `bool` function (the same "every path must return" class of bug from `validate`/`best` months ago).
+- **First shrinker draft was fundamentally broken and shrank every failing run to 0 operations** (immediately suspicious — an empty book cannot be crossed, so this was a clear signal something was wrong, not a real result). Root cause: `pop_back()` was used regardless of loop index `i`, so the loop was unconditionally stripping the sequence from the back `size()` times rather than testing removal of a *specific* element each iteration; combined with a reinsert line (`seq.push_back(seq[i])`) that read the wrong element anyway since it read *after* the erase had already happened.
+- **Second draft** switched to `erase(begin()+i)`/`insert(begin()+i, ...)` at a specific index (correct approach) but iterated *forward* while erasing — erasing index `i` shifts every later element down by one, so forward iteration silently skips elements as the vector shrinks underneath it. Fixed by iterating backward (`size()-1` down to `0`), which only invalidates already-visited indices.
+- Also had to explicitly re-verify the keep/discard branch matched `invReplay`'s true-means-clean convention (an inverted condition here was suspected as a possible contributor to the earlier 0-operation result) — confirmed and corrected: "still fails after removal" → discard (irrelevant operation); "now clean after removal" → reinstate (load-bearing operation).
+
+**Final shrink loop:** backward-indexed single pass wrapped in a `while` that repeats full passes until one entire pass removes nothing (a stable fixed point) — not just a single pass, since removing one operation can newly expose another as removable (cascading dependencies).
+
+**Proof run:** temporarily reverted the sell-crossing condition to the old (known-buggy) `incoming.price >= resting.price` for both sides. Fuzzer caught the reintroduced crossed-book violation, captured a 34-operation failing sequence, and the shrinker reduced it to a **stable 20 operations** (a full pass removing none). Bug reverted afterward; reran the 100k fuzz once more to confirm the codebase is back to zero violations.
+
+**Known, stated limitation (not a bug):** one-at-a-time shrinking can stall above the true theoretical minimum when operations reference each other by id across the sequence — e.g. removing an early submit doesn't crash a later cancel of that same id (cancel on an unknown id is already a clean no-op by design), but it silently changes the book's later trajectory, which can make that submit look load-bearing when it's actually just *referenced*, not *causally necessary*. A stable result under a single-element-removal strategy is the correct goal for this algorithm — reaching the absolute global minimum would need group/chunk removal (the kind of thing more sophisticated delta-debugging algorithms do), judged out of scope for v1's shrinker.
+
+---
 
 ### W6·1–2 — Property-based invariant testing + fuzzer (COMPLETE)
 
@@ -181,4 +204,4 @@ Ideas surfaced during W5 while thinking about FIFO inspection. Recorded so the t
 
 ## Next session
 
-**W6·3 — Shrinker, then W6·4 — Defence pass.** The fuzzer found zero organic violations (100k ops, clean), so the shrinker has nothing real to reduce yet — either deliberately inject a known bug (e.g. temporarily revert the crossing-condition fix) to prove the shrinker can take a long failing sequence down to a minimal reproducer, or deprioritise this in favour of the defence pass given time constraints. W6·4: bring the README to fully interview-defensible — every structural decision answers what/why/rejected/how-you'd-know-if-wrong/what-you'd-do-differently. This session's 100k-operation, zero-violation fuzz result is strong, quotable material to fold in. After W6, the engine moves to W7 — concurrency.
+**W6·4 — Defence pass (the last item before concurrency).** Bring the README to fully interview-defensible — for every major structural decision (Order type, book structure, cancel index, match loop, modify's fairness rule, validation, the fuzzer/invariants, the map unification), be ready with: what was chosen, why, what was rejected, how you'd know if it were wrong, what you'd do differently. Strong material now on hand: the 100k-operation zero-violation fuzz result, and two genuine bug stories with full context (the sell-crossing condition; the map-unification's begin/rbegin + reference-copy bugs) — both good "walk me through a bug you found" answers. Once the README reflects all of this, confirm the full phase-exit gate (correct/tested/defensible/visible/scope-clean) and W7 — concurrency — opens.

@@ -364,7 +364,6 @@ struct Test {
                 }
             }
 
-            
 
             if(book.checkNoCrossedBook()){
                 return history;
